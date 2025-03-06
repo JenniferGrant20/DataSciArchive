@@ -1,0 +1,151 @@
+---
+title: "PMIM402J Clustering"
+author: 'Student no. 2005070'
+date: "2024-07-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries and setup
+
+```{r, results = 'hide', error = FALSE, message = FALSE, warning = FALSE}
+library(tidyverse) # For code syntax
+library(mice) # For imputation
+options(repr.plot.width=20, repr.plot.height=10)
+```
+
+## Data preparation / preprocessing
+
+**Q1a. Why should the attribute “class” in heart-c.csv (“num”) not be included for clustering?**
+
+The ‘class’ attribute specifies individuals’ angiographic disease status and classifies the clusters we are trying to predict in this analysis, i.e. it is the dependent variable. Clustering is a form of unsupervised learning which means that it uses unlabelled data (no dependent variable). Including the classifier ‘num’ would result in the analysis no longer being unsupervised because the data would already be labelled/clustered as in supervised learning.
+
+```{r}
+# Loading the data
+data <- read.csv('heart-c.csv')
+
+# Removing the classifier variable
+heartdisease <- data %>% select(-num)
+
+# Recoding character variables into numeric
+heartdisease$sex <- recode(heartdisease$sex, 
+                           "male" = 1, 
+                           "female" = 2)
+heartdisease$cp <- recode(heartdisease$cp, 
+                          "typ_angina" = 1,
+                          "atyp_angina" = 2, 
+                          "non_anginal" = 3, 
+                          "asympt" = 4)
+heartdisease$fbs <- recode(heartdisease$fbs, 
+                           "f" = 0, 
+                           "t" = 1)
+heartdisease$restecg <- recode(heartdisease$restecg, 
+                               "normal" = 1, 
+                               "st_t_wave_abnormality" = 2,
+                               "left_vent_hyper" = 3)
+heartdisease$exang <- recode(heartdisease$exang, 
+                             "no" = 0, 
+                             "yes" = 1)
+heartdisease$slope <- recode(heartdisease$slope, 
+                             "up" = 1,
+                             "flat" = 2, 
+                             "down" = 3)
+heartdisease$thal <- recode(heartdisease$thal, 
+                            "normal" = 3, 
+                            "fixed_defect" = 6,
+                            "reversable_defect" = 7)
+
+# Looking at the missing data
+md.pattern(heartdisease) 
+```
+
+```{r, results = 'hide'}
+# Imputation
+imputedata <- heartdisease
+imputedata <- mice(heartdisease, m = 5, method = 'pmm')
+imputedata <- complete(imputedata)
+```
+
+```{r}
+# Checking the data looks okay after imputation
+summary(imputedata) 
+# And that there are no missing values now
+md.pattern(imputedata)
+
+# Scaling the data
+hd.scaled <- scale(imputedata) %>% as.data.frame()
+
+# Plotting histograms
+hd.scaled %>% gather(attributes, value, 1:ncol(hd.scaled)) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(fill = "lightblue", colour = "black") +
+  facet_wrap(~attributes, scales = "free")
+```
+
+## K-means
+
+**Q1b. Run the K-means algorithm and provide reasoning for the optimum value of K.**
+
+It was determined that the optimum value of K was 2. The reasoning for this was that the data was originally classified into 2 classes based on angiographic disease status, and that the initial error plot (figure 1) had an ‘elbow’ at index number 2 although it was not very distinct. Creating a further error plot (figure 2) with smaller increments better displays the ‘elbow’ and reasserts that 2 is the optimum value of K. Therefore, it made most sense to split the data into 2 clusters which could be interpreted as ‘likely to have the disease’ and ‘not likely to have the disease’. 
+
+```{r}
+cl <- kmeans(hd.scaled, 2)
+cl
+
+# Checking the error at different K values and creating an elbow plot
+error <- vector()
+for (i in 1:10){
+  error[i] <- kmeans(hd.scaled,i)$tot.withinss
+}
+
+plot(error, type = "l", main = "Figure 1: elbow plot")
+
+# Repeating with smaller increments to create a better elbow plot
+error <- vector()
+for (i in seq(1, 4, 0.25)){
+  error[i] <- kmeans(hd.scaled,i)$tot.withinss
+}
+
+plot(error, type = "l", main = "Figure 2: revised elbow plot")
+```
+
+**Q1c. Which features would you expect to be less useful when using K-means and why?**
+
+Categorical features would be expected to be less useful when using K-means. This is because they must be recoded as numerical variables which have arbitrary meaning, for example typical angina is coded as ‘1’ and non-anginal pain is ‘3’ but they could have been recoded as any numbers. A Euclidean distance function is applied to these numbers which consequently produces results which are not always meaningful as the numerical space between variables doesn’t necessarily reflect the difference between discrete categories. Alternative methods which are better recommended for categorical variables include using the Hamming distance, making each category its own variable, or using a variation of K-means such as K-modes or K-prototype. 
+
+
+## Hierarchical clustering
+
+**Q2a. Show the clustering results in a tree structure and provide reasoning for the optimal number of clusters.**
+
+The clustering results can be viewed in figure 3 which shows a cluster dendrogram with the optimal number of clusters outlined. Viewing this dendrogram, it was initially unclear whether 2 or 4 clusters were optimal as the height differences appeared very similar. To solve this, a bar plot of the clusters’ heights (using the clustering output) was created, shown in figure 4. From this it could be more clearly determined that there is a slightly greater height difference between 1 and 2 clusters than between 3 and 4 clusters. As such, 2 clusters were deemed the optimal number which is in line with the findings of K-means and with the prior knowledge that the data was initially classified into 2 clusters. 
+
+```{r}
+# Running the hierarchical clustering analysis
+set.seed(200)
+hd.dist <- dist(hd.scaled)
+cluster.wrd <- hclust(d = hd.dist, method = 'ward.D2')
+
+# Plotting the dendrogram, cutting it at k = 2 and plotting coloured lines to show the decided clusters
+cut.wrd <- cutree(cluster.wrd, k = 2)
+plot(cluster.wrd, labels = FALSE, main = "Figure 3: cluster dendrogram")
+rect.hclust(cluster.wrd, k = 2, border = 2:6)
+
+# Using a barplot to check the optimal K value was chosen
+barplot(cluster.wrd$height,
+        names.arg = (nrow(hd.scaled) - 1):1,
+        main = "Figure 4: barplot of cluster heights",
+        xlab = "Number of Clusters",
+        ylab = "Height")
+```
+
+**Q2b. Describe the link method you used.**
+
+Ward’s linkage was used which starts with each data point as a single cluster. The distance between clusters is then determined depending on the linkage method used. In this case, Ward’s method chooses to pair clusters with the minimal increase in within-cluster variance or error sum of squared distances. By repeating this step, the two closest clusters are merged until there is only a single cluster. 
+
+**Q2c. What are the strengths and limitations of this link method in hierarchical clustering?**
+
+One strength of Ward’s linkage is that it is well-suited to spherical/globular data, although this creates a limitation of the method being less suitable for non-globular crescent-shaped or chain-like data to which single linkage is better suited. Another strength is that Ward’s linkage is effective on noisy data unlike other linkage methods, and its algorithm is also efficient on larger datasets. The dendrogram created by Ward’s method is intuitive and easier to interpret than some produced by other link methods due to how the clusters are merged with a minimisation of within-cluster variance. However, the method is susceptible to producing distorted clusters if outliers are present, meaning that pre-processing is usually needed. Finally, it is outperformed by other methods when dealing with categorical variables as it is primarily for numeric data. 
